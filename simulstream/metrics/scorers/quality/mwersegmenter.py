@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from mweralign import mweralign
+from mweralign.segmenter import CJSegmenter
 
 from simulstream.metrics.scorers.quality import QualityScorer, QualityScoringSample
 
@@ -56,6 +57,11 @@ class MWERSegmenterBasedQualityScorer(QualityScorer):
         ...         # Compute a custom quality score
         ...         return ...
     """
+
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmenter = CJSegmenter() if args.latency_unit == "char" else None
+
     def requires_reference(self) -> bool:
         return True
 
@@ -75,15 +81,48 @@ class MWERSegmenterBasedQualityScorer(QualityScorer):
         """
         ...
 
+    def _tokenize(self, text: List[str]) -> List[str]:
+        """
+        Tokenize text using the segmenter.
+
+        Borrowed from
+        https://github.com/mjpost/mweralign/blob/d23a5479/mweralign/mweralign.py#L147
+        """
+        if self.segmenter is not None:
+            tokenized_text = []
+            for i in range(len(text)):
+                if " ### " in text[i]:
+                    pieces = text[i].strip().split(" ### ")
+                    encoded = [" ".join(self.segmenter.encode(p)) for p in pieces]
+                    tokenized_text.append(" ### ".join(encoded))
+                elif "\t" in text[i]:
+                    pieces = text[i].strip().split("\t")
+                    # underlying C++ binary still uses ###
+                    encoded = [" ".join(self.segmenter.encode(p)) for p in pieces]
+                    tokenized_text.append(" ### ".join(encoded))
+                else:
+                    tokenized_text.append(" ".join(self.segmenter.encode(text[i].strip())))
+            return "\n".join(tokenized_text)
+        else:
+            return "\n".join(text)
+
     def score(self, samples: List[QualityScoringSample]) -> float:
         resegmented_samples = []
         for sample in samples:
             assert sample.reference is not None, "Cannot realign hypothesis to missing reference"
-            resegmented_hypos = mweralign.align_texts(
-                "\n".join(sample.reference), sample.hypothesis).split("\n")
+            hypo = self._tokenize([sample.hypothesis])
+            refs = self._tokenize(sample.reference)
+            resegmented_hypos = mweralign.align_texts(refs, hypo).split("\n")
+
             assert len(sample.reference) == len(resegmented_hypos), \
                 f"Reference ({sample.audio_name}) has mismatched number of target " \
                 f"({len(sample.reference)}) and resegmented lines ({len(resegmented_hypos)})"
+
+            if self.segmenter is not None:
+                # segmenter.decode will strip() the spaces, but we need them to align with delays
+                resegmented_hypos = [
+                    hypo.replace(" ", "").replace("_", " ") for hypo in resegmented_hypos]
+
             resegmented_samples.append(ResegmentedQualityScoringSample(
                 sample.audio_name,
                 resegmented_hypos,

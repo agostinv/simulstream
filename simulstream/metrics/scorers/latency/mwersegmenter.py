@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import List
 
 from mweralign import mweralign
+from mweralign.segmenter import CJSegmenter
 
 from simulstream.metrics.readers import ReferenceSentenceDefinition, OutputWithDelays, text_items
 from simulstream.metrics.scorers.latency import LatencyScorer, LatencyScoringSample, LatencyScores
@@ -58,6 +59,7 @@ class MWERSegmenterBasedLatencyScorer(LatencyScorer):
     def __init__(self, args):
         super().__init__(args)
         self.latency_unit = args.latency_unit
+        self.segmenter = CJSegmenter() if args.latency_unit == "char" else None
 
     def requires_reference(self) -> bool:
         return True
@@ -101,18 +103,49 @@ class MWERSegmenterBasedLatencyScorer(LatencyScorer):
             f"Index {index} should have reached end of delays ({len(delays)})"
         return segmented_delays
 
+    def _tokenize(self, text: List[str]) -> List[str]:
+        """
+        Tokenize text using the segmenter.
+
+        Borrowed from
+        https://github.com/mjpost/mweralign/blob/d23a5479/mweralign/mweralign.py#L147
+        """
+        if self.segmenter is not None:
+            tokenized_text = []
+            for i in range(len(text)):
+                if " ### " in text[i]:
+                    pieces = text[i].strip().split(" ### ")
+                    encoded = [" ".join(self.segmenter.encode(p)) for p in pieces]
+                    tokenized_text.append(" ### ".join(encoded))
+                elif "\t" in text[i]:
+                    pieces = text[i].strip().split("\t")
+                    # underlying C++ binary still uses ###
+                    encoded = [" ".join(self.segmenter.encode(p)) for p in pieces]
+                    tokenized_text.append(" ### ".join(encoded))
+                else:
+                    tokenized_text.append(" ".join(self.segmenter.encode(text[i].strip())))
+            return "\n".join(tokenized_text)
+        else:
+            return "\n".join(text)
+
     def score(self, samples: List[LatencyScoringSample]) -> LatencyScores:
         resegmented_samples = []
         for sample in samples:
             assert sample.reference is not None, "Cannot realign hypothesis to missing reference"
 
-            resegmented_hypos = mweralign.align_texts(
-                "\n".join([sentence_def.content for sentence_def in sample.reference]),
-                sample.hypothesis.final_text).split("\n")
+            hypo = self._tokenize([sample.hypothesis.final_text])
+            refs = self._tokenize(
+                [sentence_def.content for sentence_def in sample.reference])
+            resegmented_hypos = mweralign.align_texts(refs, hypo).split("\n")
 
             assert len(resegmented_hypos) == len(sample.reference), \
                 f"Reference ({sample.audio_name}) has mismatched number of target " \
                 f"({len(sample.reference)}) and resegmented lines ({len(resegmented_hypos)})"
+
+            if self.segmenter is not None:
+                # segmenter.decode will strip() the spaces, but we need them to align with delays
+                resegmented_hypos = [
+                    hypo.replace(" ", "").replace("_", " ") for hypo in resegmented_hypos]
 
             ideal_delays_splits = self._split_delays_by_segmented_text(
                 sample.hypothesis.ideal_delays,

@@ -177,14 +177,14 @@ can score your speech processor by running:
 simulstream_score_latency --scorer stream_laal \
     --eval-config config/speech_processor.yaml \
     --log-file metrics.jsonl \
-    --reference REFERENCE_FILE.txt \
+    --reference TEXT_FILE.tgt \
     --audio-definition YAML_AUDIO_REFERENCES_DEFINITION.yaml
 
 simulstream_score_quality --scorer comet \
     --eval-config config/speech_processor.yaml \
     --log-file metrics.jsonl \
-    --references REFERENCES_FILE.txt \
-    --transcripts TRANSCRIPTS_FILE.txt
+    --references TEXT_FILE.tgt \
+    --transcripts TEXT_FILE.src
 
 simulstream_stats --eval-config config/speech_processor.yaml \
     --log-file metrics.jsonl
@@ -198,7 +198,9 @@ the selected metric (``--scorer``).
 
 Similarly, ``simulstream_score_quality`` evaluated the quality
 of the generated outputs against one (or more) reference (and transcript, only for metrics
-requiring them) file(s).
+requiring them) file(s). For metrics where an audio definition YAML is unnecessary, but a transcript
+is necessary, both the reference and transcript files must have corresponding file stems (e.g.,
+`TEXT_FILE`).
 
 Lastly, ``simulstream_stats`` computes statistics like the computational cost and flickering ratio.
 

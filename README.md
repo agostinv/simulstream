@@ -198,7 +198,7 @@ the selected metric (``--scorer``).
 
 Similarly, ``simulstream_score_quality`` evaluated the quality
 of the generated outputs against one (or more) reference (and transcript, only for metrics
-requiring them) file(s). For metrics where an audio definition YAML is unnecessary, but a transcript
+requiring them) file(s). If an audio definition YAML is not provided, but a transcript
 is necessary, both the reference and transcript files must have corresponding file stems (e.g.,
 `TEXT_FILE`).
 
